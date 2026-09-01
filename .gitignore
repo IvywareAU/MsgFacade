@@ -1,0 +1,10 @@
+# Build output -- everything this project produces lands under out\.
+out/
+.vs/
+
+# Visual Studio per-user state
+*.vcxproj.user
+*.suo
+
+# Smoke-test artefacts, written to the working directory by the test itself
+FacadeSmokeTest*.p2p

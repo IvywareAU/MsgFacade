@@ -1,0 +1,26 @@
+HKCR
+{
+	MsgcoreCom.MsgStore.1 = s 'MsgcoreCom MsgStore Class'
+	{
+		CLSID = s '{C421007F-17C2-4904-8F6D-7EA3B8108827}'
+	}
+	MsgcoreCom.MsgStore = s 'MsgcoreCom MsgStore Class'
+	{
+		CLSID = s '{C421007F-17C2-4904-8F6D-7EA3B8108827}'
+		CurVer = s 'MsgcoreCom.MsgStore.1'
+	}
+	NoRemove CLSID
+	{
+		ForceRemove {C421007F-17C2-4904-8F6D-7EA3B8108827} = s 'MsgcoreCom MsgStore Class'
+		{
+			ProgID = s 'MsgcoreCom.MsgStore.1'
+			VersionIndependentProgID = s 'MsgcoreCom.MsgStore'
+			ForceRemove 'Programmable'
+			InprocServer32 = s '%MODULE%'
+			{
+				val ThreadingModel = s 'Both'
+			}
+			'TypeLib' = s '{17483A69-CB5C-4A39-BB07-EB00893681A7}'
+		}
+	}
+}

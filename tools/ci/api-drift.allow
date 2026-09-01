@@ -1,0 +1,109 @@
+# Facade methods that deliberately have no COM counterpart.
+#
+# Read by check_api_drift.ps1, which fails on any public method of a mapped interface in
+# MsgFacade.h that reaches no method in MsgcoreCom.idl. Format, one per line:
+#
+#     <pair id>  <Interface>::<Method>     # why the server does not carry it
+#
+# THE BAR HERE IS HIGHER THAN A REASON. MsgFacade.h states a 1:1 intent in its own design
+# rules -- every method maps onto a [dual] interface method, LPCWSTR->BSTR,
+# void*+size->SAFEARRAY(VT_UI1). So an entry in this file is not merely an exemption; it
+# is an exception to a written promise, and it should either say why the promise does not
+# reach this method, or be the prompt to reword the promise. "Not needed by scripting
+# clients" is a reason. "Not done yet" is a to-do wearing a reason's clothes -- write it
+# as UNTRIAGED so it is counted with the others.
+#
+# Automation cannot express everything a vtable can, and that is the honest bulk of what
+# belongs here: a method taking a void* the marshaller has no VARIANT for, an out-param
+# whose lifetime a script cannot hold, a callback registered rather than sourced. Say
+# which, so the next reader can tell a marshalling limit from a decision.
+#
+# UNTRIAGED marks a line banked by -Seed on the day the check was first run. It means
+# only that nobody has looked yet, and it is counted out loud on every run.
+#
+# What this file cannot cover: interfaces the COM server carries that the facade has no
+# type for. IMsgAttrCom and IMsgDescCom are a node's ATTR and CHILD scopes -- scopes in
+# the facade, interfaces in COM -- and this check runs upstream to downstream only, so
+# neither will ever appear here. That gap is stated in the config beside this file.
+
+
+# ---------------------------------------------------------------------------------
+#  UNTRIAGED -- banked by -Seed, not decided by anybody.
+#
+#  Each line below says only that the member had no counterpart on the day the
+#  check was first run. Replacing UNTRIAGED with a real reason IS the triage, and
+#  the count is printed on every run so the backlog cannot go quiet.
+# ---------------------------------------------------------------------------------
+facade-to-com  IMsgCursor::GetKind    # UNTRIAGED (method, include/MsgFacade.h:536)
+facade-to-com  IMsgCursor::GetNode    # UNTRIAGED (method, include/MsgFacade.h:542)
+facade-to-com  IMsgCursor::IsEnd    # UNTRIAGED (method, include/MsgFacade.h:532)
+facade-to-com  IMsgCursor::Release    # UNTRIAGED (method, include/MsgFacade.h:551)
+facade-to-com  IMsgCursor::Rewind    # UNTRIAGED (method, include/MsgFacade.h:522)
+facade-to-com  IMsgLibrary::CreateStore    # UNTRIAGED (method, include/MsgFacade.h:920)
+facade-to-com  IMsgLibrary::IsValidName    # UNTRIAGED (method, include/MsgFacade.h:940)
+facade-to-com  IMsgLibrary::OpenStore    # UNTRIAGED (method, include/MsgFacade.h:925)
+facade-to-com  IMsgLibrary::Release    # UNTRIAGED (method, include/MsgFacade.h:946)
+facade-to-com  IMsgLibrary::TypeFromName    # UNTRIAGED (method, include/MsgFacade.h:937)
+facade-to-com  IMsgLibrary::TypeName    # UNTRIAGED (method, include/MsgFacade.h:935)
+facade-to-com  IMsgLibrary::VersionString    # UNTRIAGED (method, include/MsgFacade.h:944)
+facade-to-com  IMsgLibrary::WildcardMatch    # UNTRIAGED (method, include/MsgFacade.h:929)
+facade-to-com  IMsgList::AddInt    # UNTRIAGED (method, include/MsgFacade.h:440)
+facade-to-com  IMsgList::AddReal    # UNTRIAGED (method, include/MsgFacade.h:442)
+facade-to-com  IMsgList::AddText    # UNTRIAGED (method, include/MsgFacade.h:444)
+facade-to-com  IMsgList::DeleteAt    # UNTRIAGED (method, include/MsgFacade.h:448)
+facade-to-com  IMsgList::Drop    # UNTRIAGED (method, include/MsgFacade.h:447)
+facade-to-com  IMsgList::GetIntAt    # UNTRIAGED (method, include/MsgFacade.h:417)
+facade-to-com  IMsgList::GetRealAt    # UNTRIAGED (method, include/MsgFacade.h:420)
+facade-to-com  IMsgList::GetTextAt    # UNTRIAGED (method, include/MsgFacade.h:422)
+facade-to-com  IMsgList::Release    # UNTRIAGED (method, include/MsgFacade.h:452)
+facade-to-com  IMsgList::SetIntAt    # UNTRIAGED (method, include/MsgFacade.h:428)
+facade-to-com  IMsgList::SetRealAt    # UNTRIAGED (method, include/MsgFacade.h:429)
+facade-to-com  IMsgList::SetTextAt    # UNTRIAGED (method, include/MsgFacade.h:435)
+facade-to-com  IMsgNode::DeclareBlob    # UNTRIAGED (method, include/MsgFacade.h:719)
+facade-to-com  IMsgNode::DeclareGuid    # UNTRIAGED (method, include/MsgFacade.h:724)
+facade-to-com  IMsgNode::DeclareInt    # UNTRIAGED (method, include/MsgFacade.h:710)
+facade-to-com  IMsgNode::DeclareReal    # UNTRIAGED (method, include/MsgFacade.h:713)
+facade-to-com  IMsgNode::DeclareText    # UNTRIAGED (method, include/MsgFacade.h:716)
+facade-to-com  IMsgNode::GetBlob    # UNTRIAGED (method, include/MsgFacade.h:672)
+facade-to-com  IMsgNode::GetGuid    # UNTRIAGED (method, include/MsgFacade.h:676)
+facade-to-com  IMsgNode::GetInt    # UNTRIAGED (method, include/MsgFacade.h:658)
+facade-to-com  IMsgNode::GetKind    # UNTRIAGED (method, include/MsgFacade.h:647)
+facade-to-com  IMsgNode::GetPos    # UNTRIAGED (method, include/MsgFacade.h:644)
+facade-to-com  IMsgNode::GetReal    # UNTRIAGED (method, include/MsgFacade.h:664)
+facade-to-com  IMsgNode::GetTime    # UNTRIAGED (method, include/MsgFacade.h:681)
+facade-to-com  IMsgNode::GetType    # UNTRIAGED (method, include/MsgFacade.h:649)
+facade-to-com  IMsgNode::GetVect    # UNTRIAGED (method, include/MsgFacade.h:742)
+facade-to-com  IMsgNode::Move    # UNTRIAGED (method, include/MsgFacade.h:755)
+facade-to-com  IMsgNode::OpenCursor    # UNTRIAGED (method, include/MsgFacade.h:764)
+facade-to-com  IMsgNode::OpenWalker    # UNTRIAGED (method, include/MsgFacade.h:765)
+facade-to-com  IMsgNode::Release    # UNTRIAGED (method, include/MsgFacade.h:767)
+facade-to-com  IMsgNode::Rename    # UNTRIAGED (method, include/MsgFacade.h:751)
+facade-to-com  IMsgNode::Retype    # UNTRIAGED (method, include/MsgFacade.h:759)
+facade-to-com  IMsgNode::SetInt    # UNTRIAGED (method, include/MsgFacade.h:661)
+facade-to-com  IMsgNode::SetReal    # UNTRIAGED (method, include/MsgFacade.h:665)
+facade-to-com  IMsgNode::SetTime    # UNTRIAGED (method, include/MsgFacade.h:682)
+facade-to-com  IMsgStore::Arm    # UNTRIAGED (method, include/MsgFacade.h:862)
+facade-to-com  IMsgStore::Disarm    # UNTRIAGED (method, include/MsgFacade.h:863)
+facade-to-com  IMsgStore::Fire    # UNTRIAGED (method, include/MsgFacade.h:866)
+facade-to-com  IMsgStore::IsDirty    # UNTRIAGED (method, include/MsgFacade.h:833)
+facade-to-com  IMsgStore::Load    # UNTRIAGED (method, include/MsgFacade.h:822)
+facade-to-com  IMsgStore::NodeFromPath    # UNTRIAGED (method, include/MsgFacade.h:847)
+facade-to-com  IMsgStore::NodeFromPos    # UNTRIAGED (method, include/MsgFacade.h:854)
+facade-to-com  IMsgStore::Release    # UNTRIAGED (method, include/MsgFacade.h:869)
+facade-to-com  IMsgStore::Rename    # UNTRIAGED (method, include/MsgFacade.h:826)
+facade-to-com  IMsgStore::SetEvents    # UNTRIAGED (method, include/MsgFacade.h:860)
+facade-to-com  IMsgStore::SetPaging    # UNTRIAGED (method, include/MsgFacade.h:893)
+facade-to-com  IMsgStoreEvents::OnTrigger    # UNTRIAGED (method, include/MsgFacade.h:357)
+facade-to-com  IMsgVect::DeleteAt    # UNTRIAGED (method, include/MsgFacade.h:492)
+facade-to-com  IMsgVect::GetIntAt    # UNTRIAGED (method, include/MsgFacade.h:478)
+facade-to-com  IMsgVect::GetKindAt    # UNTRIAGED (method, include/MsgFacade.h:471)
+facade-to-com  IMsgVect::GetRealAt    # UNTRIAGED (method, include/MsgFacade.h:480)
+facade-to-com  IMsgVect::GetTextAt    # UNTRIAGED (method, include/MsgFacade.h:481)
+facade-to-com  IMsgVect::Release    # UNTRIAGED (method, include/MsgFacade.h:495)
+facade-to-com  IMsgVect::SetIntAt    # UNTRIAGED (method, include/MsgFacade.h:484)
+facade-to-com  IMsgVect::SetRealAt    # UNTRIAGED (method, include/MsgFacade.h:485)
+facade-to-com  IMsgVect::SetTextAt    # UNTRIAGED (method, include/MsgFacade.h:486)
+facade-to-com  IMsgWalker::GetKind    # UNTRIAGED (method, include/MsgFacade.h:599)
+facade-to-com  IMsgWalker::IsEnd    # UNTRIAGED (method, include/MsgFacade.h:597)
+facade-to-com  IMsgWalker::Next    # UNTRIAGED (method, include/MsgFacade.h:578)
+facade-to-com  IMsgWalker::Release    # UNTRIAGED (method, include/MsgFacade.h:602)

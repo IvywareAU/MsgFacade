@@ -1,0 +1,76 @@
+// Copyright © 2026 Khrustal & Mann
+//              MELBOURNE, VICTORIA, AUSTRALIA, 3000
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// MsgcoreCom.rc
+#include "resource.h"
+#include <winres.h>
+// Still the KERNEL's version header, and it is now two directories up rather
+// than one: this server moved under MsgFacade\ but it still versions with the
+// core, for the reason below.
+#include "../../Msgcore/Msgcore_version.h"
+
+// The type library is embedded, so the DLL is self-describing: regsvr32 alone
+// is enough for VBA/VB6/.NET to see the interfaces, with no loose .tlb to ship.
+1 TYPELIB "MsgcoreCom.tlb"
+
+// ATL registrar script for the one creatable coclass.
+IDR_MSGSTORE REGISTRY "MsgStore.rgs"
+
+// The COM server versions in lockstep with the core it wraps - it is a face
+// over Msgcore's data model, not a component with a release cycle of its own,
+// and a support call that reports one version has to identify both. Both
+// numbers therefore come from the single Msgcore_version.h above.
+//
+// The identity strings come from there too. CompanyName and LegalCopyright
+// were spelled out here until they were unified: this block claimed "Khrustal
+// & Mann" and "Copyright 2026" while the library it is a face over claimed
+// "Ivyware Pty Ltd, Khrustal & Mann" and "2000-2026", so the same install
+// asserted two different owners and two different date ranges depending on
+// which DLL you right-clicked.
+//
+// (VersionString, on the store itself, is where THIS server's own build tag
+// and the facade's live. This block is what a file-properties dialog shows.)
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    MSGCORE_VERSION_COMMAS
+ PRODUCTVERSION MSGCORE_VERSION_COMMAS
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS      VS_FF_DEBUG
+#else
+ FILEFLAGS      0x0L
+#endif
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_DLL
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      MSGCORE_COMPANY_NAME
+            VALUE "FileDescription",  "MsgcoreCom - COM/Automation face over Msgcore"
+            VALUE "FileVersion",      MSGCORE_VERSION_STRING
+            VALUE "InternalName",     "MsgcoreCom"
+            VALUE "LegalCopyright",   MSGCORE_COPYRIGHT
+            VALUE "OriginalFilename", "MsgcoreCom.dll"
+            VALUE "ProductName",      MSGCORE_PRODUCT_NAME
+            VALUE "ProductVersion",   MSGCORE_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

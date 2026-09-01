@@ -1,0 +1,1271 @@
+// Copyright © 2026 Khrustal & Mann
+//              MELBOURNE, VICTORIA, AUSTRALIA, 3000
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// MsgcoreCom.idl
+//
+// The COM face of the Msgcore data model: dual interfaces (vtable + IDispatch)
+// over MsgFacade, plus a connection-point event dispinterface for change
+// notification.
+//
+// The mapping is mechanical:
+//
+//      const wchar_t*        ->  BSTR
+//      msgf::IMsgStore       ->  coclass MsgStore   (the one creatable object)
+//      msgf::IMsgNode        ->  IMsgFieldCom
+//      a node's ATTR scope   ->  IMsgAttrCom
+//      a node's CHILD scope  ->  IMsgDescCom
+//      msgf::IMsgCursor      ->  IMsgCursorCom
+//      msgf::IMsgList        ->  IMsgListCom
+//      msgf::IMsgVect        ->  IMsgVectCom
+//      msgf::IMsgWalker      ->  IMsgRecursCom
+//      int (0/1)             ->  VARIANT_BOOL
+//      IMsgStoreEvents       ->  dispinterface _IMsgStoreEvents (source)
+//      IMsgPagingEvents      ->  IMsgPagingSink (registered, not sourced)
+//      the typed accessors   ->  ONE VARIANT property, `Value`
+//
+// ---------------------------------------------------------------------------
+// THIS SERVER USED TO SIT ON Msgcore_c.h, THE KERNEL'S FLAT C ABI
+// ---------------------------------------------------------------------------
+// It documented FIVE departures from a 1:1 transliteration, each one a problem
+// that surface left to its caller and a scripting client could not solve for
+// itself. Two of them are gone -- not solved differently, GONE, because
+// MsgFacade solves them one layer down for every client rather than only for
+// this one:
+//
+//   * A NODE REFERENCE IS A PATH. A raw kernel handle is invalidated by the
+//     next heap relocation, so this server used to keep every node as a chain
+//     of names and re-resolve it on entry to every method. msgf::IMsgNode IS
+//     that, so IMsgFieldCom simply holds one.
+//
+//   * LIVE vs DETACHED IS GONE. Two flat families returned the same handle
+//     type: one aliased the live tree, the other deep-copied, and a write
+//     through the copy silently reached nothing -- the single most expensive
+//     mistake available at this tier, because it had no symptom until a Save
+//     produced a file without the change. Every node here is live, so `Item`
+//     and `IsLive` and msgcDetached have all been removed rather than kept as
+//     ceremony.
+//
+// THE OTHER THREE ARE STILL THIS SERVER'S WORK, and still worth stating:
+//
+//  1. ONE VALUE PROPERTY, NOT SIXTEEN ACCESSORS. A VARIANT carries its own
+//     type, so `Value` reads whatever is there and writes whatever it is
+//     given, and the switch lives in ComUtil.cpp. `DeclareTyped` is kept for
+//     the one thing a VARIANT cannot express: a node's declared WIDTH (INT08
+//     vs INT32 vs UINT64), which a value-file round trip must preserve.
+//
+//  2. TRIGGERS ARE QUEUED, NOT CALLED BACK. The facade's change sink runs on
+//     the thread performing the mutation, with the store's lock held; calling
+//     a client's sink from there would deadlock the first handler that touched
+//     the store. So every fired trigger is COPIED into a queue and replayed on
+//     a dedicated MTA dispatch thread, with sinks held as Global Interface
+//     Table cookies so COM marshals into the sink's own apartment. A handler
+//     may block, and may call back into the store, without stalling the writer.
+//     The node's PATH travels with the queued copy because it is resolvable
+//     only while the mutation is still in progress -- by the time the event is
+//     replayed the node may be gone, which for a DELETE trigger it always is.
+//
+//     PAGING IS THE EXCEPTION AND IS NOT QUEUED: it has to answer. See the
+//     contract table on IMsgStoreCom.SetPagingSink.
+//
+//  3. ONE STORE, ONE LOCK. The facade makes every CALL atomic; it cannot make
+//     a SEQUENCE atomic, and Exists-then-Child is a sequence. So every entry
+//     point on every object of one store still serialises on that store's
+//     critical section. Two DIFFERENT stores never contend, and this is why an
+//     event handler may call back in.
+//
+// The C++ exception boundary is the last of it, and it is now a backstop
+// rather than a mechanism: every facade entry point catches and answers an
+// HRESULT, so nothing should reach the guard here -- but an exception crossing
+// a COM vtable is undefined behaviour, so every entry point is still wrapped
+// and what escapes becomes msgcKernel with a sentence.
+
+import "oaidl.idl";
+import "ocidl.idl";
+
+// Forward declarations: the interfaces below hand each other back.
+interface IMsgFieldCom;
+interface IMsgAttrCom;
+interface IMsgDescCom;
+interface IMsgCursorCom;
+interface IMsgListCom;
+interface IMsgVectCom;
+interface IMsgRecursCom;
+interface IMsgPagingSink;
+
+// ---------------------------------------------------------------------------
+// A node: a name, a typed value, and children.
+//
+// `Value` is the DEFAULT member, so `store.Root.Child("width")` reads as the
+// value in any host that honours DISPID_VALUE, and `_NewEnum` is present, so
+// `For Each child In field` walks the descendants.  Both are what a scripting
+// client expects of something that is a named value with children; neither
+// exists in the flat ABI because C has no use for either.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(C2C1C001-FB83-44FA-9AEB-C938AFCFE970),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("One node of a Msgcore store: a name, a value and children.")
+]
+interface IMsgFieldCom : IDispatch
+{
+    // The default member. Reading answers whatever the node's declared type
+    // is -- Long, Double, String, Boolean, Date, a byte array for BLOB16, a
+    // canonical string for GUID -- and Empty for a NULL/void node. Writing
+    // stores the VARIANT's own type; use DeclareTyped when the exact declared
+    // WIDTH matters.
+    [propget, id(0), helpstring("The node's value, typed as it is stored.")]
+    HRESULT Value ( [out, retval] VARIANT *pVal );
+    [propput, id(0), helpstring("Set the node's value from a VARIANT.")]
+    HRESULT Value ( [in] VARIANT newVal );
+
+    [propget, id(1), helpstring("This node's own name (not its path).")]
+    HRESULT Name ( [out, retval] BSTR *pVal );
+
+    // Text is Value seen as a string, and is NOT a synonym: reading renders a
+    // numeric node with its own formatting rules, and writing stores a WSTR16
+    // whatever the node was. It is the accessor a ".value" file write wants.
+    [propget, id(2), helpstring("The value rendered as text.")]
+    HRESULT Text ( [out, retval] BSTR *pVal );
+    [propput, id(2), helpstring("Store the value as text (WSTR16).")]
+    HRESULT Text ( [in] BSTR newVal );
+
+    [propget, id(3), helpstring("The MsgDataType code of this node.")]
+    HRESULT DataType ( [out, retval] LONG *pVal );
+
+    // The same vocabulary msgcore_type_name emits, so it round-trips through
+    // MsgStore.TypeFromName and matches what a ".type" file holds.
+    [propget, id(4), helpstring("The stable name of this node's type, e.g. \"UINT64\".")]
+    HRESULT TypeName ( [out, retval] BSTR *pVal );
+
+    [propget, id(5), helpstring("True when the node holds no value.")]
+    HRESULT IsNull ( [out, retval] VARIANT_BOOL *pVal );
+
+    // id(6) was IsVoid, and id(9) was IsLive. Both are gone: the first asked a
+    // distinction the store does not draw, and the second asked whether writes
+    // through this object reach the store, which they now always do.
+
+    // The identity a script should keep, and the one MsgStore.FieldAt takes
+    // back: a '.' before each child step and an '@' before each attribute step,
+    // from the root, and "" for the root itself.
+    //
+    //      ""                          the root
+    //      ".Config"                   a child of it
+    //      ".Config.Window@Colour"     an attribute of a grandchild
+    //
+    // It is unambiguous because a name cannot contain either separator -- the
+    // store's own validator refuses both -- which is what makes it reversible.
+    // The old spelling was a dotted chain with no leading separator and no way
+    // to name an attribute at all.
+    [propget, id(7), helpstring("This node's path from the root (\"\" for the root).")]
+    HRESULT Path ( [out, retval] BSTR *pVal );
+
+    // The identity Msgcore itself uses -- what triggers carry, and the only
+    // thing a DELETED node still has. Typed as a 64-bit integer (VT_I8), which
+    // .NET, PowerShell and 64-bit VBA read directly; hosts that cannot
+    // (VBScript, 32-bit VBA) use Path, which is why both are here.
+    // MsgStore.PathOf turns one into Msgcore's own path spelling.
+    [propget, id(8), helpstring("This node's stable positional handle (inode).")]
+    HRESULT P2Pos ( [out, retval] hyper *pVal );
+
+    [id(10), helpstring("True if a child of that name exists.")]
+    HRESULT Exists ( [in] BSTR name, [out, retval] VARIANT_BOOL *pVal );
+
+    // Writes through the result reach the store, as they do through every node
+    // object here. msgcNoField if there is no child of that name -- use Declare
+    // to create one.
+    //
+    // IT REACHES A LIST AND A VECT TOO, which it could not before: it used to
+    // resolve through SelectItem, which THROWS on a container ("a list is not
+    // an item"), so Child failed for a list that was plainly there and
+    // ChildList existed for that gap. Those two remain as the TYPED spellings.
+    [id(11), helpstring("The child of that name (msgcNoField if absent).")]
+    HRESULT Child ( [in] BSTR name, [out, retval] IMsgFieldCom **ppField );
+
+    // id(12) was Item, a detached read-only COPY, and it is gone with the
+    // distinction it existed to expose. Child is the one lookup now.
+
+    // Create or update, with the type taken from the VARIANT. `update` False
+    // leaves an existing child alone and answers it unchanged.
+    [id(13), helpstring("Create or update a child from a VARIANT value.")]
+    HRESULT Declare ( [in] BSTR name, [in] VARIANT value,
+                      [in, defaultvalue(-1)] VARIANT_BOOL update,
+                      [out, retval] IMsgFieldCom **ppField );
+
+    // The one thing a VARIANT cannot say. dataType is a MsgDataType, and an
+    // unrecognised one is msgcType rather than a silent fallback to INT32.
+    // FLOAT and every unsigned width can be declared here now; through the old
+    // flat surface neither could.
+    [id(14), helpstring("Create or update a child at an EXPLICIT MsgDataType width.")]
+    HRESULT DeclareTyped ( [in] BSTR name, [in] VARIANT value, [in] LONG dataType,
+                           [in, defaultvalue(-1)] VARIANT_BOOL update,
+                           [out, retval] IMsgFieldCom **ppField );
+
+    [id(15), helpstring("Delete one child; False if there was none of that name.")]
+    HRESULT Delete ( [in] BSTR name, [out, retval] VARIANT_BOOL *pDeleted );
+
+    [id(16), helpstring("Drop every child of this node.")]
+    HRESULT Truncate ( );
+
+    [id(17), helpstring("Rename a child in place; False if there was no such child.")]
+    HRESULT RenameChild ( [in] BSTR oldName, [in] BSTR newName,
+                          [out, retval] VARIANT_BOOL *pRenamed );
+
+    // `destination` must be a node OF THIS STORE -- msgcForeign otherwise, and
+    // that check is not pedantry: two stores commonly have the same shape, so a
+    // foreign destination would not fail, it would move the child into the
+    // wrong heap.
+    //
+    // A move to where the child ALREADY IS answers S_FALSE and does nothing.
+    // That is not tidiness: the move below is a remove-and-re-add, and running
+    // it with one node as both source and destination loses the child.
+    [id(18), helpstring("Move a child to another node of THIS store; "
+                        "False if there was no such child.")]
+    HRESULT MoveChild ( [in] IMsgFieldCom *destination, [in] BSTR name,
+                        [out, retval] VARIANT_BOOL *pMoved );
+
+    // Changes an existing child's TYPE, seeding a ZERO value of it. It took a
+    // VARIANT before, because the flat ABI's retype entry points were one per
+    // type and a value was the only way to pick one -- but a retype cannot keep
+    // the old value by definition, so that argument was always a fiction:
+    // passing 7 to make an INT32 read as though it stored 7. It takes the type.
+    [id(19), helpstring("Retype an existing child to a MsgDataType, seeding zero.")]
+    HRESULT RetypeChild ( [in] BSTR name, [in] LONG dataType,
+                          [out, retval] VARIANT_BOOL *pRetyped );
+
+    // `create` is accepted and IGNORED in both: a collection comes into being
+    // when the first thing is declared into it, so there is no state for the
+    // flag to select. It stays in the signature because every existing client
+    // passes it.
+    [id(20), helpstring("This node's '@' attribute collection.")]
+    HRESULT Attributes ( [in, defaultvalue(-1)] VARIANT_BOOL create,
+                         [out, retval] IMsgAttrCom **ppAttr );
+
+    [id(21), helpstring("This node's descendant collection.")]
+    HRESULT Descendants ( [in, defaultvalue(-1)] VARIANT_BOOL create,
+                          [out, retval] IMsgDescCom **ppDesc );
+
+    [propget, id(22), helpstring("A cursor over this node's children.")]
+    HRESULT Cursor ( [out, retval] IMsgCursorCom **ppCurs );
+
+    [propget, id(23), helpstring("This node seen as a linked list (msgcNotList if it is not one).")]
+    HRESULT List ( [out, retval] IMsgListCom **ppList );
+
+    [propget, id(24), helpstring("This node seen as an indexed vector (msgcNotVect if it is not one).")]
+    HRESULT Vector ( [out, retval] IMsgVectCom **ppVect );
+
+    // The node's timestamp, as a DATE rather than as epoch seconds -- which is
+    // what a host formats, compares and shows without arithmetic. Unset reads
+    // as 0 (30 December 1899); Touch writes "now".
+    [propget, id(25), helpstring("The node's timestamp attribute, as a Date.")]
+    HRESULT Timestamp ( [out, retval] DATE *pVal );
+    [propput, id(25), helpstring("Set the node's timestamp attribute.")]
+    HRESULT Timestamp ( [in] DATE newVal );
+
+    [id(26), helpstring("Stamp this node with the current time.")]
+    HRESULT Touch ( );
+
+    [propget, id(27), helpstring("How many children this node has.")]
+    HRESULT Count ( [out, retval] LONG *pVal );
+
+    [propget, id(28), helpstring("True if this node holds a linked list.")]
+    HRESULT IsList ( [out, retval] VARIANT_BOOL *pVal );
+    [propget, id(29), helpstring("True if this node holds an indexed vector.")]
+    HRESULT IsVect ( [out, retval] VARIANT_BOOL *pVal );
+
+    // id(30) was IsAttr and id(31) was IsDesc -- "is this node ITSELF a
+    // collection object". Nothing answers to that any more: a collection is a
+    // scope of a node rather than a thing a node can be.
+
+    [propget, id(32), helpstring("True if this node has a saved value on its stack.")]
+    HRESULT IsStacked ( [out, retval] VARIANT_BOOL *pVal );
+    [propget, id(33), helpstring("True if this node carries attributes.")]
+    HRESULT IsAttributed ( [out, retval] VARIANT_BOOL *pVal );
+    [propget, id(34), helpstring("True if this node carries descendants.")]
+    HRESULT IsDescendant ( [out, retval] VARIANT_BOOL *pVal );
+
+    // -----------------------------------------------------------------------
+    // Child containers.
+    //
+    // DeclareList / DeclareVect create one under this node and answer it LIVE,
+    // so adds and element writes through the result reach the store. They are
+    // the only way to bring a list or a vect into existence from this tier;
+    // before msgcore_field_declare_list existed, IMsgListCom and IMsgVectCom
+    // could only ever be reached over a file some other tool had written.
+    //
+    // ChildList / ChildVect reach an existing one BY NAME. They used to be the
+    // ONLY way to reach one, because Child could not; Child can now, so these
+    // are the TYPED spellings -- they answer msgcNotList / msgcNotVect for a
+    // name that exists but is the other kind, so neither needs a pre-check.
+    //
+    // dataType is one of the msgcType values and fixes the vect's element
+    // prototype; count may be 0, since a vect grows.
+    // -----------------------------------------------------------------------
+    [id(35), helpstring("Create a list under this node and return it live.")]
+    HRESULT DeclareList ( [in] BSTR name, [out, retval] IMsgListCom **ppList );
+
+    [id(36), helpstring("Create a vector under this node and return it live.")]
+    HRESULT DeclareVect ( [in] BSTR name, [in] LONG count, [in] LONG dataType,
+                          [out, retval] IMsgVectCom **ppVect );
+
+    [id(37), helpstring("An existing child list by name. Child cannot reach one.")]
+    HRESULT ChildList ( [in] BSTR name, [out, retval] IMsgListCom **ppList );
+
+    [id(38), helpstring("An existing child vector by name. Child cannot reach one.")]
+    HRESULT ChildVect ( [in] BSTR name, [out, retval] IMsgVectCom **ppVect );
+
+    // The recursive walker rooted at this node -- a whole subtree from one
+    // flat loop, descending only where the caller asks it to.
+    [propget, id(39), helpstring("A recursive walker over this node's subtree.")]
+    HRESULT Walker ( [out, retval] IMsgRecursCom **ppWalker );
+
+    // id(40) was Stack, which handed back a MsgStack object over the core's
+    // MsgStck. What that object was is ONE saved (name, value) pair living
+    // inside this node, so it is the three methods below rather than a coclass
+    // with a lifetime of its own to get wrong.
+
+    // A child by POSITION in the collection, for walking without a cursor.
+    [id(41), helpstring("The child at that index (msgcRange past the end).")]
+    HRESULT ChildAt ( [in] LONG index, [out, retval] IMsgFieldCom **ppField );
+
+    // -----------------------------------------------------------------------
+    // The value stack: a scoped override of this node's own name and value,
+    // held INSIDE the node by the store.
+    //
+    //      f.PushValue
+    //      f.Value = "speculative"
+    //      f.PopValue                  ' back to what it was
+    //
+    // A caller can hand-roll that for one value, and for one value it should.
+    // What this buys is the two things the hand-rolled version cannot: the NAME
+    // travels with the value, and the saved pair lives in the store -- so it
+    // survives everything the node survives, and any reference to that node can
+    // pop what another one pushed.
+    //
+    // IT NESTS: push, push, pop, pop unwinds in order. This interface used to
+    // say there was one saved pair per node and that pushing twice replaced the
+    // first, which was wrong -- the kernel merely ASSERTED that, in a debug
+    // build, while implementing a linked stack. The assertion is gone.
+    //
+    // Pop and Drop answer False for "there was nothing stacked" rather than
+    // failing, so a drain loop must test that answer or IsStacked -- never
+    // merely whether the call succeeded.
+    // -----------------------------------------------------------------------
+    [id(42), helpstring("Save this node's name and value.")]
+    HRESULT PushValue ( );
+
+    [id(43), helpstring("Restore the saved pair; False if nothing was stacked.")]
+    HRESULT PopValue ( [out, retval] VARIANT_BOOL *pRestored );
+
+    [id(44), helpstring("Forget the saved pair without restoring it; False if there was none.")]
+    HRESULT DropValue ( [out, retval] VARIANT_BOOL *pDropped );
+
+    // For Each child In field. Snapshot semantics: the enumerator takes the
+    // children up front, so a handler may delete as it walks -- which the
+    // underlying cursor, being a live position, would not survive.
+    [propget, id(-4), restricted, helpstring("For Each support over the children.")]
+    HRESULT _NewEnum ( [out, retval] IUnknown **ppUnk );
+};
+
+// ---------------------------------------------------------------------------
+// The '@' attribute collection of one node.
+//
+// IMsgDescCom below is the SAME SHAPE, member for member and dispid for dispid,
+// and now the same CODE: the two collections differ in one constant, so every
+// method of both forwards to one function with a scope argument. They remain
+// two interfaces because they are two collections -- a node has both at once,
+// and a single type would make `field.Attributes` and `field.Descendants`
+// interchangeable in a way they are not.
+//
+// `Item` HERE IS LIVE, like everything else. It used to be a detached copy --
+// there was no live accessor for a collection member at all -- so reading was
+// the only safe thing to do with one and a write vanished. Declare and Item now
+// reach the same node.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(FB553EF3-3025-4B24-9F99-894135CEB231),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("A node's '@' attribute collection.")
+]
+interface IMsgAttrCom : IDispatch
+{
+    [propget, id(0), helpstring("The attribute of that name (msgcNoField if absent).")]
+    HRESULT Item ( [in] BSTR name, [out, retval] IMsgFieldCom **ppField );
+
+    [propget, id(1), helpstring("How many attributes are set.")]
+    HRESULT Count ( [out, retval] LONG *pVal );
+
+    [propget, id(2), helpstring("True when there are none.")]
+    HRESULT IsEmpty ( [out, retval] VARIANT_BOOL *pVal );
+
+    [id(3), helpstring("True if an attribute of that name exists.")]
+    HRESULT Exists ( [in] BSTR name, [out, retval] VARIANT_BOOL *pVal );
+
+    [id(4), helpstring("Create or update one attribute from a VARIANT value.")]
+    HRESULT Declare ( [in] BSTR name, [in] VARIANT value,
+                      [in, defaultvalue(-1)] VARIANT_BOOL update,
+                      [out, retval] IMsgFieldCom **ppField );
+
+    [id(5), helpstring("Delete one attribute; False if there was none.")]
+    HRESULT Delete ( [in] BSTR name, [out, retval] VARIANT_BOOL *pDeleted );
+
+    [id(6), helpstring("Drop every attribute.")]
+    HRESULT Truncate ( );
+
+    [propget, id(7), helpstring("A cursor over the attributes.")]
+    HRESULT Cursor ( [out, retval] IMsgCursorCom **ppCurs );
+
+    [propget, id(-4), restricted, helpstring("For Each support.")]
+    HRESULT _NewEnum ( [out, retval] IUnknown **ppUnk );
+};
+
+[
+    object,
+    uuid(3E1B7347-6E6D-4E0D-A633-6EC6177FD70C),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("A node's descendant collection.")
+]
+interface IMsgDescCom : IDispatch
+{
+    [propget, id(0), helpstring("The descendant of that name (msgcNoField if absent).")]
+    HRESULT Item ( [in] BSTR name, [out, retval] IMsgFieldCom **ppField );
+
+    [propget, id(1), helpstring("How many descendants there are.")]
+    HRESULT Count ( [out, retval] LONG *pVal );
+
+    [propget, id(2), helpstring("True when there are none.")]
+    HRESULT IsEmpty ( [out, retval] VARIANT_BOOL *pVal );
+
+    [id(3), helpstring("True if a descendant of that name exists.")]
+    HRESULT Exists ( [in] BSTR name, [out, retval] VARIANT_BOOL *pVal );
+
+    [id(4), helpstring("Create or update one descendant from a VARIANT value.")]
+    HRESULT Declare ( [in] BSTR name, [in] VARIANT value,
+                      [in, defaultvalue(-1)] VARIANT_BOOL update,
+                      [out, retval] IMsgFieldCom **ppField );
+
+    [id(5), helpstring("Delete one descendant; False if there was none.")]
+    HRESULT Delete ( [in] BSTR name, [out, retval] VARIANT_BOOL *pDeleted );
+
+    [id(6), helpstring("Drop every descendant.")]
+    HRESULT Truncate ( );
+
+    [propget, id(7), helpstring("A cursor over the descendants.")]
+    HRESULT Cursor ( [out, retval] IMsgCursorCom **ppCurs );
+
+    [propget, id(-4), restricted, helpstring("For Each support.")]
+    HRESULT _NewEnum ( [out, retval] IUnknown **ppUnk );
+};
+
+// ---------------------------------------------------------------------------
+// A live position within a collection.
+//
+// The one object here that carries STATE, and therefore the one that cannot be
+// re-resolved per call the way IMsgFieldCom is (departure 1): a position is
+// what it holds.  So the store carries a mutation counter, and a cursor whose
+// counter is stale silently rebuilds itself and seeks back to its index before
+// answering.  That is not the same as never having been invalidated -- an
+// element deleted meanwhile shifts everything after it -- which is why
+// _NewEnum, whose contract is one pass over a fixed set, snapshots instead.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(14200BA9-2C01-4180-BC05-5964F6A39568),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("A position within a node's children, attributes or descendants.")
+]
+interface IMsgCursorCom : IDispatch
+{
+    // The bridge out of a walk: a node that survives the mutation this cursor
+    // would not. It was a detached COPY here before, because a cursor was all
+    // the flat ABI could hand one back from.
+    [propget, id(0), helpstring("The node at this position.")]
+    HRESULT Field ( [out, retval] IMsgFieldCom **ppField );
+
+    // S_FALSE, not an error, when that walked off the end -- so
+    // `Do Until c.Next() <> 0` and `while (c.Next() == S_OK)` both work, and a
+    // vtable caller does not need a second call to EndOfCursor to find out.
+    [id(1), helpstring("Advance one position. S_FALSE if that walked off the end.")]
+    HRESULT Next ( );
+
+    [id(2), helpstring("Rewind to the first position.")]
+    HRESULT Seek ( );
+
+    [id(3), helpstring("Move to the element of that name; False if there is none.")]
+    HRESULT GotoName ( [in] BSTR name, [out, retval] VARIANT_BOOL *pFound );
+
+    [id(4), helpstring("Move to that index; False if it is out of range.")]
+    HRESULT GotoIndex ( [in] LONG index, [out, retval] VARIANT_BOOL *pFound );
+
+    [propget, id(5), helpstring("True when the cursor has walked off the end.")]
+    HRESULT EndOfCursor ( [out, retval] VARIANT_BOOL *pVal );
+
+    [propget, id(6), helpstring("True when the cursor sits before the first element.")]
+    HRESULT StartOfCursor ( [out, retval] VARIANT_BOOL *pVal );
+
+    [propget, id(7), helpstring("How many elements the cursor spans.")]
+    HRESULT Count ( [out, retval] LONG *pVal );
+
+    // -1 once the cursor has walked off the end: a state, reported as a value a
+    // caller can test, rather than as an error raised by a property read. -1
+    // cannot be mistaken for a real position, which 0 and Count both can.
+    [propget, id(8), helpstring("The current position's index, or -1 past the end.")]
+    HRESULT Index ( [out, retval] LONG *pVal );
+
+    [propget, id(9), helpstring("The current element's name.")]
+    HRESULT Name ( [out, retval] BSTR *pVal );
+
+    [propget, id(10), helpstring("True when the current element is a plain item.")]
+    HRESULT IsItem ( [out, retval] VARIANT_BOOL *pVal );
+    [propget, id(11), helpstring("True when the current element is a linked list.")]
+    HRESULT IsList ( [out, retval] VARIANT_BOOL *pVal );
+    [propget, id(12), helpstring("True when the current element is an indexed vector.")]
+    HRESULT IsVect ( [out, retval] VARIANT_BOOL *pVal );
+
+    [id(13), helpstring("Delete the current element and move on.")]
+    HRESULT Delete ( );
+
+    [propget, id(-4), restricted, helpstring("For Each support (a snapshot, from the start).")]
+    HRESULT _NewEnum ( [out, retval] IUnknown **ppUnk );
+};
+
+// ---------------------------------------------------------------------------
+// A node's doubly-linked list.
+//
+// Add takes a VARIANT and picks the flat ABI's int / double / string entry
+// point from its type, which is the whole of what the three-family
+// add_head_int / add_head_double / add_head_wstr split means to a caller who
+// already has a typed value in hand.  A type the list cannot hold answers
+// msgcType rather than being coerced: silently storing 3.7 as 3 is worse than
+// refusing it.
+//
+// CAVEAT, and it is the flat ABI's: Msgcore_c.h says msgcore_list_from_field
+// "takes ownership via copy-construction", and P3PmsgList's field constructor
+// is indeed an assignment rather than the r_Object() aliasing that
+// msgcore_field_child uses -- so whether a write through this object reaches
+// the store is a property of Msgcore's copy semantics, not of this layer.
+// test\ComSmokeTest.cpp writes a list, re-reads it from the store and reports
+// the answer; com\README.md records it. IMsgVectCom next door does NOT share
+// the doubt: msgcore_vect_from_field passes r_Object() and is live.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(928732B8-35E6-4766-A493-64D30ECDE2AF),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("A node's doubly-linked list of values.")
+]
+interface IMsgListCom : IDispatch
+{
+    [propget, id(1), helpstring("How many entries the list holds.")]
+    HRESULT Count ( [out, retval] LONG *pVal );
+
+    [id(2), helpstring("Prepend a Long, Double or String.")]
+    HRESULT AddHead ( [in] VARIANT value );
+
+    [id(3), helpstring("Append a Long, Double or String.")]
+    HRESULT AddTail ( [in] VARIANT value );
+
+    [id(4), helpstring("Drop the first entry.")]
+    HRESULT DropHead ( );
+
+    [id(5), helpstring("Drop the last entry.")]
+    HRESULT DropTail ( );
+
+    [id(6), helpstring("Drop every entry.")]
+    HRESULT Truncate ( );
+
+    // -----------------------------------------------------------------------
+    // Indexed access. Item is DISPID_VALUE, so `list(2)` is the entry at 2 and
+    // `list(2) = 9` rewrites it -- the spelling a VBScript or Excel caller
+    // expects. The index is 0-based and out of range answers msgcRange rather
+    // than a silent Empty.
+    //
+    // Indexing costs a walk from the head: a list is a linked sequence, and
+    // the position type it is really walked by is a raw heap address that a
+    // relocation invalidates, which is not something to hand to a script. For
+    // a long list use For Each, which walks once.
+    // -----------------------------------------------------------------------
+    [propget, id(0), helpstring("The entry at that index, typed as stored.")]
+    HRESULT Item ( [in] LONG index, [out, retval] VARIANT *pVal );
+    [propput, id(0), helpstring("Rewrite the entry at that index.")]
+    HRESULT Item ( [in] LONG index, [in] VARIANT value );
+
+    [propget, id(7), helpstring("The msgcType of the entry at that index.")]
+    HRESULT TypeAt ( [in] LONG index, [out, retval] LONG *pVal );
+
+    [id(8), helpstring("Remove the entry at that index.")]
+    HRESULT RemoveAt ( [in] LONG index, [out, retval] VARIANT_BOOL *pRemoved );
+
+    // For Each value In list. Snapshot semantics, as everywhere else here.
+    [propget, id(-4), restricted, helpstring("For Each support over the entries.")]
+    HRESULT _NewEnum ( [out, retval] IUnknown **ppUnk );
+};
+
+// ---------------------------------------------------------------------------
+// A node's indexed vector.
+//
+// This interface used to carry a note saying it had no Count and no _NewEnum,
+// that the omission was the flat ABI's rather than this tier's, and that "the
+// day msgcore_vect_get_count exists, Count and _NewEnum are appended here and
+// the IID does not change."  That day came: the entry point exists, both are
+// appended below, and the IID is indeed unchanged.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(B96D42B3-5102-4570-A515-FF49C46B7BD7),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("A node's indexed vector of values.")
+]
+interface IMsgVectCom : IDispatch
+{
+    [propget, id(0), helpstring("The value at that index, typed as it is stored.")]
+    HRESULT Item ( [in] LONG index, [out, retval] VARIANT *pVal );
+
+    [id(1), helpstring("True if that element holds a plain value.")]
+    HRESULT IsData ( [in] LONG index, [out, retval] VARIANT_BOOL *pVal );
+    [id(2), helpstring("True if that element holds a named field.")]
+    HRESULT IsField ( [in] LONG index, [out, retval] VARIANT_BOOL *pVal );
+    [id(3), helpstring("True if that element holds a linked list.")]
+    HRESULT IsList ( [in] LONG index, [out, retval] VARIANT_BOOL *pVal );
+    [id(4), helpstring("True if that element holds another vector.")]
+    HRESULT IsVect ( [in] LONG index, [out, retval] VARIANT_BOOL *pVal );
+
+    // id(5) was Field, the element at an index AS A NODE. There is no such
+    // accessor below this tier: a vector's elements are addressed by index and
+    // reached as VALUES (Item), as a nested list (ListAt) or as a nested vector
+    // (VectAt) -- not as nodes with paths of their own, which is what an
+    // IMsgFieldCom is. NameAt answers the one thing Field was usually asked for.
+
+    [id(6), helpstring("Drop every element.")]
+    HRESULT Truncate ( );
+
+    // -----------------------------------------------------------------------
+    // The count, and everything it makes possible.
+    // -----------------------------------------------------------------------
+    [propget, id(7), helpstring("How many elements the vector holds.")]
+    HRESULT Count ( [out, retval] LONG *pVal );
+
+    [propput, id(0), helpstring("Rewrite the value at that index.")]
+    HRESULT Item ( [in] LONG index, [in] VARIANT value );
+
+    [propget, id(8), helpstring("The msgcType of the element at that index.")]
+    HRESULT TypeAt ( [in] LONG index, [out, retval] LONG *pVal );
+
+    [propget, id(9), helpstring("The name of the element at that index.")]
+    HRESULT NameAt ( [in] LONG index, [out, retval] BSTR *pVal );
+
+    // A vect element may itself be a container; these answer msgcNotList /
+    // msgcNotVect when it is not.
+    [id(10), helpstring("The element at that index as a list.")]
+    HRESULT ListAt ( [in] LONG index, [out, retval] IMsgListCom **ppList );
+    [id(11), helpstring("The element at that index as a vector.")]
+    HRESULT VectAt ( [in] LONG index, [out, retval] IMsgVectCom **ppVect );
+
+    // id(12) was InsertAt, which deep-copied a node into a slot and grew the
+    // vector. There is no insert below this tier to call: a vector is declared
+    // with its length and its element prototype, and DeclareVect is where the
+    // length is chosen. Delete compacts; nothing shifts the other way.
+
+    [id(13), helpstring("Remove the element at that index.")]
+    HRESULT RemoveAt ( [in] LONG index, [out, retval] VARIANT_BOOL *pRemoved );
+
+    [propget, id(-4), restricted, helpstring("For Each support over the elements.")]
+    HRESULT _NewEnum ( [out, retval] IUnknown **ppUnk );
+};
+
+// ---------------------------------------------------------------------------
+// IMsgStackCom is gone. It wrapped the core's MsgStck as an object of its own,
+// with a Push / Pop / Drop / IsEmpty / Name / Field surface and two behaviours
+// that had to be normalised by hand (an unconnected stack reported itself as
+// NOT empty; Pop's success did not mean anything was restored).
+//
+// What it wrapped is one saved (name, value) pair living inside a node, so it
+// is now four members of IMsgFieldCom -- PushValue, PopValue, DropValue and
+// IsStacked -- with no second object, no second lifetime, and Pop answering
+// whether it restored anything.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// MsgRecurs -- the recursive subtree walker (P2PmsgRecurs).
+//
+// A whole subtree from one flat loop. It owns a chain of cursors and splices
+// descent into its own advance, but it descends only when the caller says
+// Push -- which is what makes it a WALKER rather than an iterator, and what
+// lets a caller PRUNE a branch by simply not descending into it. That is the
+// one thing For Each over Descendants cannot express.
+//
+//      Set w = field.Walker
+//      Do While Not w.AtEnd
+//          If w.Name <> "cache" Then w.Push     ' prune by not pushing
+//          w.MoveNext
+//      Loop
+//
+// The walker holds live cursors into the tree, so it must not outlive a
+// mutation of that tree: finish the walk, then mutate. Unlike the enumerators
+// elsewhere in this server it is NOT a snapshot, because snapshotting a
+// subtree of unknown size is the thing it exists to avoid.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(7E31D0C6-4A92-4B77-8E05-9C6B3F214AD8),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("A recursive walker over a node's subtree.")
+]
+interface IMsgRecursCom : IDispatch
+{
+    [id(1), helpstring("Advance. At the end of a pushed level this ascends.")]
+    HRESULT MoveNext ( );
+
+    // Descend. There are THREE outcomes below this tier and the difference is
+    // what lets a generic walk be written without knowing the tree's shape:
+    // it descended; it was an item with nothing under it; or it was not
+    // something that can be descended into at all (a list, a vect, a bare
+    // value). Only the first moves the walker, and the depth answered says
+    // which happened -- so pushing at every stop is correct, and pruning is
+    // simply not pushing.
+    //
+    // The core's own Push THREW for the third case, which is why a walk over a
+    // tree containing a list used to have to test IsField first.
+    [id(2), helpstring("Descend into the current element; answers the resulting depth.")]
+    HRESULT Push ( [out, retval] LONG *pDepth );
+
+    [id(3), helpstring("Ascend one level; answers the resulting depth.")]
+    HRESULT Pop ( [out, retval] LONG *pDepth );
+
+    [id(4), helpstring("Abandon every pushed level and resume at the outermost.")]
+    HRESULT Break ( );
+
+    [propget, id(5), helpstring("True when the walk is finished.")]
+    HRESULT AtEnd ( [out, retval] VARIANT_BOOL *pVal );
+
+    [propget, id(0), helpstring("The name of the current element.")]
+    HRESULT Name ( [out, retval] BSTR *pVal );
+
+    [propget, id(6), helpstring("True if the current element is a plain node.")]
+    HRESULT IsField ( [out, retval] VARIANT_BOOL *pVal );
+    [propget, id(7), helpstring("True if the current element is a list.")]
+    HRESULT IsList ( [out, retval] VARIANT_BOOL *pVal );
+    [propget, id(8), helpstring("True if the current element is a vector.")]
+    HRESULT IsVect ( [out, retval] VARIANT_BOOL *pVal );
+
+    [propget, id(9), helpstring("The current element as a node.")]
+    HRESULT Field ( [out, retval] IMsgFieldCom **ppField );
+    [propget, id(10), helpstring("The current element as a list.")]
+    HRESULT List ( [out, retval] IMsgListCom **ppList );
+    [propget, id(11), helpstring("The current element as a vector.")]
+    HRESULT Vector ( [out, retval] IMsgVectCom **ppVect );
+
+    // Two new ones, and they come from the same place: the walker reports where
+    // it is, and the server assembles a PATH from that as the walk moves. Depth
+    // is 0 at the outermost level; Path is the current stop's, in the same
+    // spelling MsgStore.FieldAt takes -- so unlike everything else on this
+    // object it stays true after the walk has moved on.
+    [propget, id(12), helpstring("How deep the walk currently is (0 at the outermost).")]
+    HRESULT Depth ( [out, retval] LONG *pVal );
+
+    [propget, id(13), helpstring("The current stop's path. Outlives the walk.")]
+    HRESULT Path ( [out, retval] BSTR *pVal );
+};
+
+// ---------------------------------------------------------------------------
+// The one creatable object: a Msgcore store (P2PmsgMgr).
+//
+// CoCreateInstance gives an EMPTY store with default addressing, so the two
+// ordinary openings are one call each:
+//
+//      Set store = CreateObject("MsgcoreCom.MsgStore")   ' new, empty
+//      store.Open "C:\data\settings.p2p"                 ' or an existing file
+//
+// Each CoCreateInstance is its own document -- unlike TargetCom's P2PNetwork,
+// which wraps a process-wide singleton -- because a store IS a document and
+// nothing about two of them interferes.
+//
+// It owns every object it hands out, transitively: fields, collections and
+// cursors all hold a reference to it, so a store cannot be destroyed while
+// anything is still pointing into its heap, however careless the client is
+// about release order.  Close() is therefore about WHEN, not whether.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(A15B2AEA-8560-43CF-AC8B-144DBCBDAB14),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("One Msgcore store (wraps P2PmsgMgr).")
+]
+interface IMsgStoreCom : IDispatch
+{
+    [id(1), helpstring("Load a .p2p file into this store, replacing its content.")]
+    HRESULT Open ( [in] BSTR path );
+
+    // An omitted path saves back over Filename; msgcSave if there is none.
+    [id(2), helpstring("Save to a file, or back over the one it was opened from.")]
+    HRESULT Save ( [in, defaultvalue("")] BSTR path );
+
+    // Idempotent, and not required: releasing the last reference does the same.
+    // It exists so a script can free a multi-megabyte heap at a point it
+    // chooses rather than at whatever moment the host collects.
+    [id(3), helpstring("Destroy the store now. Everything derived from it then fails cleanly.")]
+    HRESULT Close ( );
+
+    // Was Nullify. The store empties and stays usable -- and, unlike the old
+    // method, KEEPS ITS FILENAME, because it is the same store rather than a
+    // rebuilt one. (The rebuild still happens; it happens one layer down, where
+    // it is done once for every client. The core's own Nullify closes the heap
+    // and leaves the manager pointing at nothing while still answering
+    // is_valid, so nothing may call it directly.)
+    //
+    // Every node reference a client is holding stays valid and reports
+    // msgcStale -- "the node this object names is gone", as distinct from
+    // msgcNoField, "the name you asked me to look up is not there". That is
+    // what "the store was emptied" should look like from a handle.
+    //
+    // The FILENAME survives, which is not free: Clear rebuilds one layer down
+    // and the rebuilt manager has no filename, so the facade keeps its own copy.
+    // Save() with no path after a Clear therefore writes the emptied store back
+    // over the file it came from, which is the only reading of "empty this
+    // document" that a host's File menu can use.
+    [id(4), helpstring("Empty the store, keeping it open and its filename.")]
+    HRESULT Clear ( );
+
+    // RENAMES THE ROOT NODE, which this tier could not do at all before: the
+    // only rename available was a MoveFileEx on the store's FILE, wearing the
+    // name Rename in the kernel and spelled RenameFile here to say so.
+    //
+    // The file rename is gone -- a host has its own file API for that -- and
+    // this is the inverse of RootName. msgcName for an unusable name.
+    [id(5), helpstring("Rename the ROOT NODE. The inverse of RootName.")]
+    HRESULT RenameRoot ( [in] BSTR newName );
+
+    // Empty until the store has been opened from or saved to a file.
+    [propget, id(6), helpstring("The file this store was opened from or last saved to.")]
+    HRESULT Filename ( [out, retval] BSTR *pVal );
+
+    [propget, id(7), helpstring("The name of the root node.")]
+    HRESULT RootName ( [out, retval] BSTR *pVal );
+
+    [propget, id(8), helpstring("True when there are unsaved changes.")]
+    HRESULT Dirty ( [out, retval] VARIANT_BOOL *pVal );
+    [propput, id(8), helpstring("Set or clear the unsaved-changes flag.")]
+    HRESULT Dirty ( [in] VARIANT_BOOL newVal );
+
+    [propget, id(9), helpstring("The store's heap size in bytes.")]
+    HRESULT Size ( [out, retval] LONG *pVal );
+
+    [propget, id(10), helpstring("False once Close has been called, or after a failed Open.")]
+    HRESULT IsValid ( [out, retval] VARIANT_BOOL *pVal );
+
+    // Everything starts here.
+    [propget, id(11), helpstring("The root node, bound to this store.")]
+    HRESULT Root ( [out, retval] IMsgFieldCom **ppField );
+
+    // Takes a STRING as a path (".Config.Window.Width", "" for the root) or a
+    // NUMBER as a P2Pos, because the two identities IMsgFieldCom publishes
+    // should both come back. A path that does not parse is msgcPath, one that
+    // parses and names nothing is msgcNoField, and a P2Pos that does not
+    // resolve is msgcNoPos.
+    //
+    // BOTH ANSWER THE SAME KIND OF OBJECT NOW. The asymmetry this method used
+    // to carry -- a path gave a writable node and a P2Pos gave a detached copy
+    // whose writes vanished -- was the flat ABI's deep copy. A position is
+    // searched for and answered as a route, so it is writable too.
+    //
+    // A P2Pos whose node has been DELETED is msgcNoPos rather than the debug
+    // break it used to be: the search that resolves it walks the live tree, so
+    // a freed block is simply not found. That was the one sharp edge this layer
+    // could not file off, and it is filed off.
+    [id(12), helpstring("The node at a path or at a P2Pos. Both are writable.")]
+    HRESULT FieldAt ( [in] VARIANT pathOrPos, [out, retval] IMsgFieldCom **ppField );
+
+    // THE SAME SPELLING FieldAt TAKES, which it was not before: this used to
+    // answer the kernel's own path grammar -- a leading '.' and the root's NAME
+    // as the first segment -- so feeding it back here found nothing, and the
+    // help string had to say so. A path handed out can now be handed back.
+    [id(13), helpstring("The path of the node at a P2Pos. FieldAt takes it back.")]
+    HRESULT PathOf ( [in] hyper p2pos, [out, retval] BSTR *pVal );
+
+    // Discards the current content. addrMode is a MsgAddrMode; the two sizes
+    // are the initial and maximum heap in bytes. The addressing mode is fixed
+    // for a store's lifetime, which is why it is set here and nowhere else.
+    //
+    // 0 means "the default" for both sizes, and a small non-zero initial is
+    // raised rather than passed on: below 512 bytes the core does not fail, it
+    // DOES NOT RETURN. Both of those are handled one layer down now, so a
+    // number a script invents is safe here.
+    [id(14), helpstring("Replace the content with a new empty store of a given addressing mode.")]
+    HRESULT CreateNew ( [in, defaultvalue(3)] LONG addrMode,
+                        [in, defaultvalue(0)] LONG initialBytes,
+                        [in, defaultvalue(0)] LONG maxBytes );
+
+    // --- change notification ----------------------------------------------
+    //
+    // Arm a node and _IMsgStoreEvents::OnChange is raised for it. DELETE fires
+    // by itself when a node is freed; INSERT and UPDATE fire when a writer
+    // calls FireTrigger, which is the flat ABI's rule unchanged -- Msgcore does
+    // not detect its own mutations, it reports the ones it is told about.
+    [id(15), helpstring("Arm a node (by P2Pos) for a MsgTriggerFlag mask.")]
+    HRESULT ArmTrigger ( [in] LONG mask, [in] hyper p2pos );
+
+    [id(16), helpstring("Disarm a node for a MsgTriggerFlag mask.")]
+    HRESULT DisarmTrigger ( [in] LONG mask, [in] hyper p2pos );
+
+    [id(17), helpstring("Fire a trigger for a node; answers how many registrations ran.")]
+    HRESULT FireTrigger ( [in] LONG mask, [in] hyper p2pos,
+                          [out, retval] LONG *pFired );
+
+    // --- utilities ---------------------------------------------------------
+    // On the store rather than free-standing because a scripting host has
+    // nowhere to put a free function, and this is the object it already holds.
+    [id(18), helpstring("The stable name of a MsgDataType code.")]
+    HRESULT TypeName ( [in] LONG dataType, [out, retval] BSTR *pVal );
+
+    [id(19), helpstring("The MsgDataType code of a type name (-1 if unrecognised).")]
+    HRESULT TypeFromName ( [in] BSTR typeName, [out, retval] LONG *pVal );
+
+    [id(20), helpstring("The store's own wildcard comparison.")]
+    HRESULT WildcardMatch ( [in] BSTR pattern, [in] BSTR name,
+                            [out, retval] VARIANT_BOOL *pMatched );
+
+    // This server's build tag AND the layers below it -- one string that
+    // answers "what am I talking to" all the way down. It used to be this
+    // server's alone, because the flat ABI published no version of its own.
+    [propget, id(21), helpstring("This server's build tag and the store's, for logs.")]
+    HRESULT VersionString ( [out, retval] BSTR *pVal );
+
+    // Ask whether a name is usable BEFORE declaring it, rather than declaring
+    // and reading the error. New at this tier, and worth having wherever names
+    // come from user input: the rule is 1 to 63 UTF-16 units and none of
+    // . @ : ^ / \ * ? | < > or " -- the first two because they are the path
+    // grammar's separators.
+    [id(28), helpstring("True if that name is usable as a node name.")]
+    HRESULT IsValidName ( [in] BSTR name, [out, retval] VARIANT_BOOL *pValid );
+
+    // -----------------------------------------------------------------------
+    // PAGING.  A store can delegate the residency of a subtree to its host, so
+    // it may describe far more data than it holds.
+    //
+    // READ THIS BEFORE WIRING A HANDLER.  Paging is NOT OnChange, and the two
+    // contracts are opposites at every point:
+    //
+    //                      OnChange                  OnPageIn / OnPageOut
+    //   raised on          a dispatch thread         the ACCESSING thread
+    //   timing             after the fact            during, core is BLOCKED
+    //   store lock         not held                  HELD
+    //   return value       ignored                   the answer; false = failed
+    //   may re-enter       yes, freely               only the named subtree
+    //   may block          yes                       no
+    //
+    // A page-in that has not returned is data that is not there, so there is
+    // no version of this that defers -- the queueing that makes OnChange safe
+    // cannot be applied. A handler that blocks stalls the store; one that
+    // re-enters beyond its subtree deadlocks on the lock it is already under.
+    //
+    // Because these are synchronous and answer a value, they are NOT on the
+    // _IMsgStoreEvents connection point (a dispinterface source cannot usefully
+    // return one across a marshalling boundary, and marshalling is the whole
+    // problem here). They are a directly-registered sink object instead, and
+    // SetPagingSink refuses one that is not in this apartment.
+    // -----------------------------------------------------------------------
+    [id(22), helpstring("Register (Nothing clears) the synchronous paging sink.")]
+    HRESULT SetPagingSink ( [in] IMsgPagingSink *sink );
+
+    [id(23), helpstring("Page the dataset at that P2Pos in. False if the sink refused.")]
+    HRESULT PageIn ( [in] VARIANT p2pos, [out, retval] VARIANT_BOOL *pOk );
+
+    [id(24), helpstring("Page the dataset at that P2Pos out, optionally flushing.")]
+    HRESULT PageOut ( [in] VARIANT p2pos, [in, defaultvalue(0)] VARIANT_BOOL flush,
+                      [out, retval] VARIANT_BOOL *pOk );
+
+    // id(25) was PageSumm, which recounted a paged node after additions and
+    // removals. It is not exposed below this tier and is not published here.
+
+    // Suspend the registration for a section of work and restore it after --
+    // what the C++ SafeRegistrationPush does with a constructor and destructor.
+    // A Save is the usual reason: it walks everything and must not fault the
+    // whole store in on the way past.
+    //
+    // TWO states are msgcPageState, and both are protections: a SECOND push
+    // (the save has one slot, and a nested push loses the first set) and a push
+    // with NO sink installed (there is then nothing to restore at the matching
+    // pop, which asserts). PopPaging without a push is the same answer.
+    [id(26), helpstring("Suspend the paging registration.")]
+    HRESULT PushPaging ( );
+    [id(27), helpstring("Restore the suspended paging registration.")]
+    HRESULT PopPaging ( );
+};
+
+// ---------------------------------------------------------------------------
+// The paging sink a host implements. See the contract table on
+// IMsgStoreCom.SetPagingSink -- every method here runs on the accessing thread,
+// under the store lock, with the core waiting.
+//
+// Return S_OK and set the flag True for "done, the data is resident". Anything
+// else is taken as a refusal and reported to the caller that provoked it; an
+// error is not propagated as an exception, because the core cannot unwind
+// through a page fault.
+// ---------------------------------------------------------------------------
+[
+    object,
+    uuid(5F0A3B29-7C41-4D96-8A2E-B3D7016E4F58),
+    dual,
+    nonextensible,
+    pointer_default(unique),
+    helpstring("Synchronous paging callbacks implemented by the host.")
+]
+interface IMsgPagingSink : IDispatch
+{
+    [id(1), helpstring("Make the dataset at that P2Pos resident.")]
+    HRESULT OnPageIn ( [in] VARIANT p2pos, [out, retval] VARIANT_BOOL *pHandled );
+
+    [id(2), helpstring("Release the dataset at that P2Pos, flushing if asked.")]
+    HRESULT OnPageOut ( [in] VARIANT p2pos, [in] VARIANT_BOOL flush,
+                        [out, retval] VARIANT_BOOL *pHandled );
+
+    // id(3) was OnPopulate, the core's third paging callback. It is not
+    // exposed below this tier and is not published here.
+};
+
+// version(1.0) DELIBERATELY, and it is not laziness: the type library's version
+// is what a client binds against (IDispatchImpl names it, and every
+// "MsgcoreComLib 1.0" reference in a .NET or VBA project does too), so bumping
+// it breaks every existing binding for the sake of a number. The GUID is the
+// identity; MsgStore.VersionString is where this server says what it is and
+// what it is sitting on.
+[
+    uuid(17483A69-CB5C-4A39-BB07-EB00893681A7),
+    version(1.0),
+    helpstring("MsgcoreCom -- COM layer over MsgFacade")
+]
+library MsgcoreComLib
+{
+    importlib("stdole2.tlb");
+
+    typedef [uuid(0668AE17-B3B1-4F40-9024-D158492B5C70), v1_enum, public,
+             helpstring("Msgcore-specific HRESULTs, as returned by these methods.")]
+    enum MsgcoreError
+    {
+        [helpstring("The store is closed, or was never opened")]      msgcClosed    = 0x80040300,
+        [helpstring("A file could not be loaded")]                    msgcLoad      = 0x80040301,
+        [helpstring("A file could not be saved")]                     msgcSave      = 0x80040302,
+        [helpstring("No node of that name")]                          msgcNoField   = 0x80040303,
+        [helpstring("That P2Pos does not resolve in this store")]      msgcNoPos     = 0x80040304,
+        [helpstring("The value's type cannot be stored or read here")] msgcType      = 0x80040305,
+        [helpstring("The node could not be created or updated")]       msgcDeclare   = 0x80040306,
+        [helpstring("This node is not a linked list")]                 msgcNotList   = 0x80040307,
+        [helpstring("This node is not an indexed vector")]             msgcNotVect   = 0x80040308,
+        [helpstring("This node has no such collection")]               msgcNoColl    = 0x80040309,
+        [helpstring("Index out of range")]                             msgcRange     = 0x8004030A,
+        // 0x8004030B was msgcDetached -- a write through a detached copy that
+        // reached nothing. There is no detached node any more, so nothing can
+        // answer it. The value is left RESERVED rather than reused, so a client
+        // that still tests for it compiles and simply never sees it.
+        [helpstring("The store threw; it may be inconsistent")]         msgcKernel    = 0x8004030C,
+        [helpstring("The node this object named is gone")]             msgcStale     = 0x8004030D,
+        [helpstring("A name is empty, too long, or malformed")]        msgcName      = 0x8004030E,
+        [helpstring("Nothing is registered to receive the event")]     msgcNoSink    = 0x8004030F,
+        // The other one worth branching on: an object from a different store.
+        [helpstring("That object belongs to a different store")]       msgcForeign   = 0x80040310,
+        [helpstring("Paging is already suspended, was not suspended, or has no sink")] msgcPageState = 0x80040311,
+        [helpstring("That path does not parse")]                       msgcPath      = 0x80040312,
+        [helpstring("The value is past what that node can hold")]      msgcLimit     = 0x80040313
+    } MsgcoreError;
+
+    // The VBLockData_* vocabulary, which is also what TypeName spells and what
+    // a ".type" file holds. DeclareTyped is the only place a caller normally
+    // needs one: everywhere else the VARIANT carries its own type.
+    typedef [uuid(FFC83703-E43D-4D85-ACFF-FA995369A2A3), v1_enum, public,
+             helpstring("Msgcore node data types.")]
+    enum MsgDataType
+    {
+        [helpstring("No value")]                 msgcTypeNull   = 0,
+        [helpstring("Signed 8-bit")]             msgcTypeInt08  = 1,
+        [helpstring("Unsigned 8-bit")]           msgcTypeUInt08 = 2,
+        [helpstring("Signed 16-bit")]            msgcTypeInt16  = 3,
+        [helpstring("Unsigned 16-bit")]          msgcTypeUInt16 = 4,
+        [helpstring("Signed 32-bit")]            msgcTypeInt32  = 5,
+        [helpstring("Unsigned 32-bit")]          msgcTypeUInt32 = 6,
+        [helpstring("Signed 64-bit")]            msgcTypeInt64  = 7,
+        [helpstring("Unsigned 64-bit")]          msgcTypeUInt64 = 8,
+        [helpstring("32-bit floating point")]    msgcTypeFloat  = 9,
+        [helpstring("64-bit floating point")]    msgcTypeDouble = 10,
+        [helpstring("Boolean")]                  msgcTypeBool   = 13,
+        [helpstring("Length-counted wide string")] msgcTypeBstr = 18,
+        [helpstring("Wide string")]              msgcTypeWStr   = 26,
+        [helpstring("Opaque byte block")]        msgcTypeBlob   = 34,
+        [helpstring("GUID")]                     msgcTypeGuid   = 47
+    } MsgDataType;
+
+    // Fixed at CreateNew and never afterwards: it decides the width of every
+    // internal reference in the heap and therefore the on-disk layout.
+    typedef [uuid(FBD75AC1-EEA6-431B-84CC-F9F529C856AB), v1_enum, public,
+             helpstring("Heap addressing width, chosen once per store.")]
+    enum MsgAddrMode
+    {
+        [helpstring("16-bit: smallest, for a store under 64 KB")] msgcAddr16 = 1,
+        [helpstring("32-bit: the usual choice")]                  msgcAddr32 = 2,
+        [helpstring("64-bit: the default on a 64-bit build")]     msgcAddr64 = 3
+    } MsgAddrMode;
+
+    // What ArmTrigger takes and what OnChange carries. One invocation carries
+    // exactly one bit, never a combination.
+    typedef [uuid(CD3D7D7A-BC6E-433C-9EC7-4AF11DB1646E), v1_enum, public,
+             helpstring("Change-notification kinds.")]
+    enum MsgTriggerFlag
+    {
+        [helpstring("A node was added")]                msgcTriggerInsert = 1,
+        [helpstring("A node's value changed")]          msgcTriggerUpdate = 2,
+        [helpstring("A node was removed")]              msgcTriggerDelete = 4,
+        [helpstring("The armed node became active")]    msgcTriggerActive = 8,
+        [helpstring("All of the above")]                msgcTriggerAll    = 15
+    } MsgTriggerFlag;
+
+    [
+        uuid(AE287CFB-B7C6-451F-B6DA-EB583E32A7AE),
+        helpstring("Store events. Raised on a dedicated dispatch thread, never on "
+                   "the thread that performed the mutation, and marshalled into "
+                   "the sink's apartment.")
+    ]
+    dispinterface _IMsgStoreEvents
+    {
+        properties:
+        methods:
+            // `path` is resolved AT THE MOMENT OF THE MUTATION and travels
+            // with the queued copy, because by the time this is raised the
+            // node may no longer exist.
+            //
+            // IT IS ALWAYS EMPTY FOR msgcTriggerDelete, and that is not a
+            // shortcut. The DELETE trigger is fired from inside
+            // P2PmsgHeap_FreeBSTRio (MsgVBHeap.cpp:2847) AFTER the block has
+            // been freed and collated, so at the only moment the path could be
+            // captured the node is already gone. What the event carries
+            // instead is the P2Pos you armed, which is what identifies WHICH
+            // node went -- and is the whole of the answer for a delete.
+            //
+            // DO NOT hand that P2Pos to FieldAt: see the warning there.
+            [id(1), helpstring("An armed node changed. `kind` is one MsgTriggerFlag bit.")]
+            void OnChange ( [in] LONG kind, [in] hyper p2pos, [in] BSTR path );
+
+            // Raised when the event queue overflowed and events were dropped --
+            // the only way a client can tell that it is not seeing everything.
+            [id(2), helpstring("Something the store wants to report; it keeps running.")]
+            void OnError ( [in] BSTR what );
+    };
+
+    [
+        uuid(C421007F-17C2-4904-8F6D-7EA3B8108827),
+        helpstring("MsgcoreCom.MsgStore -- create this one, then use Root.")
+    ]
+    coclass MsgStore
+    {
+        [default] interface IMsgStoreCom;
+        [default, source] dispinterface _IMsgStoreEvents;
+    };
+
+    // Everything below is handed back by a store and never CoCreated: each one
+    // is a view ONTO a store's heap and is meaningless without it, which is
+    // exactly what noncreatable says.
+    [
+        uuid(82D38328-6579-4FE6-907D-B249D897A8BD),
+        noncreatable,
+        helpstring("A node. Returned by MsgStore.Root, Child, Item and friends.")
+    ]
+    coclass MsgField
+    {
+        [default] interface IMsgFieldCom;
+    };
+
+    [
+        uuid(C557B326-D522-4969-A1C6-A7D45C1768B6),
+        noncreatable,
+        helpstring("An attribute collection. Returned by MsgField.Attributes.")
+    ]
+    coclass MsgAttr
+    {
+        [default] interface IMsgAttrCom;
+    };
+
+    [
+        uuid(9D1C8CA0-7378-4020-AAFC-4806F965C35F),
+        noncreatable,
+        helpstring("A descendant collection. Returned by MsgField.Descendants.")
+    ]
+    coclass MsgDesc
+    {
+        [default] interface IMsgDescCom;
+    };
+
+    [
+        uuid(9DD559F1-16F8-43B6-9263-3AA9170DBC92),
+        noncreatable,
+        helpstring("A cursor. Returned by MsgField.Cursor and the collections'.")
+    ]
+    coclass MsgCursor
+    {
+        [default] interface IMsgCursorCom;
+    };
+
+    [
+        uuid(405688ED-BAA0-4FF5-901F-6995B3A9B4D3),
+        noncreatable,
+        helpstring("A linked list. Returned by MsgField.List.")
+    ]
+    coclass MsgList
+    {
+        [default] interface IMsgListCom;
+    };
+
+    [
+        uuid(7A59D020-9F77-46C4-9F51-9EDD4247295D),
+        noncreatable,
+        helpstring("An indexed vector. Returned by MsgField.Vector.")
+    ]
+    coclass MsgVect
+    {
+        [default] interface IMsgVectCom;
+    };
+
+    // The MsgStack coclass (B4E71C83-...) is gone with IMsgStackCom: a node's
+    // saved value is four members of IMsgFieldCom, not an object.
+
+    [
+        uuid(1A6F5D92-8C34-4B71-A0DE-472B9E1CF830),
+        noncreatable,
+        helpstring("A recursive subtree walker. Returned by MsgField.Walker.")
+    ]
+    coclass MsgRecurs
+    {
+        [default] interface IMsgRecursCom;
+    };
+
+    // Not a coclass: the HOST implements this one and hands it to
+    // MsgStore.SetPagingSink. It is named here only so MIDL puts it in the
+    // type library, which is what lets a scripting or .NET host implement it.
+    interface IMsgPagingSink;
+};

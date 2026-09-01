@@ -1,0 +1,35 @@
+// Copyright © 2026 Khrustal & Mann
+//              MELBOURNE, VICTORIA, AUSTRALIA, 3000
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+//
+// FacadeModule.cpp -- regular-MFC-DLL module glue.
+//
+// MFC supplies DllMain for a regular DLL; the one CWinApp instance below is
+// what makes AfxGetStaticModuleState()/AFX_MANAGE_STATE work at the exported
+// entry points.  Every vtable method in this DLL opens with that macro, because
+// every one of them is an exported entry point as far as MFC is concerned --
+// the caller is a client module with its own module state.
+#include "stdafx.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+class CMsgFacadeApp : public CWinApp
+{
+    public:
+        CMsgFacadeApp ( ) { }
+};
+
+CMsgFacadeApp theApp;
