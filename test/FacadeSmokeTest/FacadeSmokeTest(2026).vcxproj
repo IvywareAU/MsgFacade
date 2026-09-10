@@ -27,13 +27,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -45,7 +45,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
 
-  <!-- Shared output root; see MsgFacade(2022).vcxproj for the why. -->
+  <!-- Shared output root; see MsgFacade(2026).vcxproj for the why. -->
   <PropertyGroup>
     <OutDir>$(MSBuildThisFileDirectory)..\..\out\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(MSBuildThisFileDirectory)..\..\out\$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>

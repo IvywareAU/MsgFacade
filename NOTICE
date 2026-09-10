@@ -27,10 +27,10 @@ terms and carry their own notices, which must not be removed:
     com/Targetver.h                    MFC sample source.
                                        Copyright (C) Microsoft Corporation.
     com/MsgStore.rgs                   ATL registrar script, wizard-generated.
-    MsgFacade(2022).sln                Visual Studio solution file.
-    MsgFacade(2022).vcxproj            Visual Studio project files.
-    com/MsgcoreCom(2022).vcxproj
-    test/FacadeSmokeTest/FacadeSmokeTest(2022).vcxproj
+    MsgFacade(2026).sln                Visual Studio solution file.
+    MsgFacade(2026).vcxproj            Visual Studio project files.
+    com/MsgcoreCom(2026).vcxproj
+    test/FacadeSmokeTest/FacadeSmokeTest(2026).vcxproj
 
 Targetver.h additionally carries Microsoft's Fluent UI referential-material
 notice; licence terms for the Fluent UI are available separately from

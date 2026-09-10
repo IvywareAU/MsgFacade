@@ -29,14 +29,14 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfAtl>Static</UseOfAtl>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfAtl>Static</UseOfAtl>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
 
@@ -218,9 +218,9 @@
       <MsgcoreBin Condition="'$(MsgcoreBin)'=='' and Exists('$(MSBuildThisFileDirectory)..\..\bin\$(Configuration)64\Msgcore.dll')">$(MSBuildThisFileDirectory)..\..\bin\$(Configuration)64</MsgcoreBin>
     </PropertyGroup>
     <Error Condition="!Exists('$(FacadeBin)\MsgFacade.dll')"
-           Text="MsgFacade.dll not found in '$(FacadeBin)'. Build MsgFacade(2022).vcxproj for $(Configuration)|$(Platform) first -- this server links it and cannot load without it." />
+           Text="MsgFacade.dll not found in '$(FacadeBin)'. Build MsgFacade(2026).vcxproj for $(Configuration)|$(Platform) first -- this server links it and cannot load without it." />
     <Error Condition="'$(MsgcoreBin)'==''"
-           Text="Msgcore.dll not found. Looked beside MsgFacade.dll, in Msgcore\out\$(Platform)\$(Configuration) and in bin\$(Configuration)64. Build Msgcore(2022).vcxproj for $(Configuration)|$(Platform) first." />
+           Text="Msgcore.dll not found. Looked beside MsgFacade.dll, in Msgcore\out\$(Platform)\$(Configuration) and in bin\$(Configuration)64. Build Msgcore(2026).vcxproj for $(Configuration)|$(Platform) first." />
     <Copy SourceFiles="$(FacadeBin)\MsgFacade.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(MsgcoreBin)\Msgcore.dll"  DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>

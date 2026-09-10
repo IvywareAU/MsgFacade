@@ -35,9 +35,9 @@ about the dependency, not a compile-time coupling of this server.)
 ## Build and register
 
 ```powershell
-$msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
-& $msbuild "..\MsgFacade(2022).vcxproj" /p:Configuration=Debug /p:Platform=x64   # first
-& $msbuild ".\MsgcoreCom(2022).vcxproj" /p:Configuration=Debug /p:Platform=x64
+$msbuild = "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe"
+& $msbuild "..\MsgFacade(2026).vcxproj" /p:Configuration=Debug /p:Platform=x64   # first
+& $msbuild ".\MsgcoreCom(2026).vcxproj" /p:Configuration=Debug /p:Platform=x64
 regsvr32 /n /i:user ".\out\x64\Debug\MsgcoreCom.dll"    # per-user, HKCU only, no elevation
 ```
 
