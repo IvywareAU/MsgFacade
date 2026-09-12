@@ -1,0 +1,230 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{7B2E4C55-9A31-4D0E-8C67-1F5A3B9D2E70}</ProjectGuid>
+    <ProjectName>MsgcoreCom</ProjectName>
+    <RootNamespace>MsgcoreCom</RootNamespace>
+    <Keyword>AtlProj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <!-- Pure ATL, NO MFC: this server sees the store only through MsgFacade's
+       public header, and the fact that it links without a line of MFC is what
+       proves that header is a complete boundary rather than a partial one.
+       See stdafx.h. -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseOfAtl>Static</UseOfAtl>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseOfAtl>Static</UseOfAtl>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+            Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')"
+            Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+            Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')"
+            Label="LocalAppDataPlatform" />
+  </ImportGroup>
+
+  <PropertyGroup Label="UserMacros" />
+
+  <PropertyGroup>
+    <OutDir>$(MSBuildThisFileDirectory)out\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)out\$(Platform)\$(Configuration)\obj\</IntDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <TargetName>MsgcoreCom</TargetName>
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <TargetName>MsgcoreCom</TargetName>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+
+  <!-- ===== Debug | x64 ===== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <TargetEnvironment>X64</TargetEnvironment>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <OutputDirectory>$(IntDir)</OutputDirectory>
+      <HeaderFileName>MsgcoreCom_h.h</HeaderFileName>
+      <InterfaceIdentifierFileName>MsgcoreCom_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>MsgcoreCom_p.c</ProxyFileName>
+      <!-- A BARE filename: TypeLibraryName is relative to OutputDirectory, so
+           anything with a directory in it produces out\x64\Debug\obj\out\... and
+           RC2135 when the .rc tries to embed it. -->
+      <TypeLibraryName>MsgcoreCom.tlb</TypeLibraryName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <AdditionalIncludeDirectories>$(IntDir);.;..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+    </ClCompile>
+    <ResourceCompile>
+      <!-- $(IntDir) alone, not $(ProjectDir)$(IntDir): IntDir is absolute here,
+           so prefixing it doubles the path and RC stops finding the .tlb. -->
+      <AdditionalIncludeDirectories>$(IntDir);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ModuleDefinitionFile>MsgcoreCom.def</ModuleDefinitionFile>
+      <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)$(TargetName).lib</ImportLibrary>
+      <AdditionalDependencies>MsgFacade.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\out\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- ===== Release | x64 ===== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Midl>
+      <TargetEnvironment>X64</TargetEnvironment>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <OutputDirectory>$(IntDir)</OutputDirectory>
+      <HeaderFileName>MsgcoreCom_h.h</HeaderFileName>
+      <InterfaceIdentifierFileName>MsgcoreCom_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>MsgcoreCom_p.c</ProxyFileName>
+      <TypeLibraryName>MsgcoreCom.tlb</TypeLibraryName>
+      <GenerateStublessProxies>true</GenerateStublessProxies>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <AdditionalIncludeDirectories>$(IntDir);.;..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(IntDir);$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ModuleDefinitionFile>MsgcoreCom.def</ModuleDefinitionFile>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <ImportLibrary>$(OutDir)$(TargetName).lib</ImportLibrary>
+      <AdditionalDependencies>MsgFacade.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(MSBuildThisFileDirectory)..\out\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- ===== Source files ===== -->
+  <ItemGroup>
+    <Midl Include="MsgcoreCom.idl" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClCompile Include="stdafx.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ComModule.cpp" />
+    <ClCompile Include="ComUtil.cpp" />
+    <ClCompile Include="ComStore.cpp" />
+    <ClCompile Include="ComField.cpp" />
+    <ClCompile Include="ComColl.cpp" />
+    <ClCompile Include="ComCursor.cpp" />
+    <ClCompile Include="ComWalk.cpp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="ComUtil.h" />
+    <ClInclude Include="ComStore.h" />
+    <ClInclude Include="ComField.h" />
+    <ClInclude Include="ComColl.h" />
+    <ClInclude Include="ComCursor.h" />
+    <ClInclude Include="ComWalk.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="Targetver.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ResourceCompile Include="MsgcoreCom.rc" />
+    <None Include="MsgStore.rgs" />
+    <None Include="MsgcoreCom.def" />
+  </ItemGroup>
+
+  <!-- Two DLLs must sit next to this server for regsvr32 to be able to load it:
+       MsgFacade.dll, which it links, and Msgcore.dll, which that links and which
+       is an MFC extension DLL and so is never linked statically.
+
+       Staged here rather than left to PATH: a registered in-proc server is
+       loaded by whatever process CoCreates it, and that process's PATH is not
+       ours. COM loads an in-proc server with LOAD_WITH_ALTERED_SEARCH_PATH, so
+       the copies BESIDE THE SERVER are the ones that get used.
+
+       A missing DLL would otherwise show up only as 0xC06D007E when regsvr32
+       loads the server, which is a long way from the cause, so both are errors
+       here, after the link, where the message can say what to build. -->
+  <Target Name="StageDependencies" AfterTargets="Build">
+    <PropertyGroup>
+      <FacadeBin>$(MSBuildThisFileDirectory)..\out\$(Platform)\$(Configuration)</FacadeBin>
+      <!-- The facade stages its own Msgcore.dll beside itself, so that is the
+           first place to look and the one that matches what was just built. -->
+      <MsgcoreBin Condition="Exists('$(FacadeBin)\Msgcore.dll')">$(FacadeBin)</MsgcoreBin>
+      <MsgcoreBin Condition="'$(MsgcoreBin)'=='' and Exists('$(MSBuildThisFileDirectory)..\..\Msgcore\out\$(Platform)\$(Configuration)\Msgcore.dll')">$(MSBuildThisFileDirectory)..\..\Msgcore\out\$(Platform)\$(Configuration)</MsgcoreBin>
+      <MsgcoreBin Condition="'$(MsgcoreBin)'=='' and Exists('$(MSBuildThisFileDirectory)..\..\bin\$(Configuration)64\Msgcore.dll')">$(MSBuildThisFileDirectory)..\..\bin\$(Configuration)64</MsgcoreBin>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(FacadeBin)\MsgFacade.dll')"
+           Text="MsgFacade.dll not found in '$(FacadeBin)'. Build MsgFacade(2022).vcxproj for $(Configuration)|$(Platform) first -- this server links it and cannot load without it." />
+    <Error Condition="'$(MsgcoreBin)'==''"
+           Text="Msgcore.dll not found. Looked beside MsgFacade.dll, in Msgcore\out\$(Platform)\$(Configuration) and in bin\$(Configuration)64. Build Msgcore(2022).vcxproj for $(Configuration)|$(Platform) first." />
+    <Copy SourceFiles="$(FacadeBin)\MsgFacade.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MsgcoreBin)\Msgcore.dll"  DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>
